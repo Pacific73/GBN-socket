@@ -1,30 +1,30 @@
 #ifndef _gbn_h
 #define _gbn_h
 
-#include<sys/types.h>
-#include<sys/socket.h>
-#include<sys/ioctl.h>
-#include<signal.h>
-#include<unistd.h>
-#include<fcntl.h>
-#include<stdio.h>
-#include<stdlib.h>
-#include<string.h>
-#include<netinet/in.h>
-#include<errno.h>
-#include<netdb.h>
-#include<time.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <signal.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <netinet/in.h>
+#include <errno.h>
+#include <netdb.h>
+#include <time.h>
 
 /*----- Error variables -----*/
 extern int h_errno;
 extern int errno;
 
 /*----- Protocol parameters -----*/
-#define LOSS_PROB 1e-2    /* loss probability                            */
-#define CORR_PROB 1e-3    /* corruption probability                      */
-#define DATALEN   1024    /* length of the payload                       */
+#define LOSS_PROB 1e-2    /* Loss probability                            */
+#define CORR_PROB 1e-3    /* Corruption probability                      */
+#define DATALEN   1024    /* Length of the payload                       */
 #define N         1024    /* Max number of packets a single call to gbn_send can process */
-#define TIMEOUT      1    /* timeout to resend packets (1 second)        */
+#define TIMEOUT      1    /* Timeout to resend packets (1 second)        */
 
 /*----- Packet types -----*/
 #define SYN      0        /* Opens a connection                          */
@@ -35,6 +35,11 @@ extern int errno;
 #define FINACK   5        /* Acknowledgement of the FIN packet           */
 #define RST      6        /* Reset packet used to reject new connections */
 
+/*----- Self defined parameters -----*/
+#define BUFFLEN   2048    /* Length of the buffer that prevents overflow */
+#define INFOLEN      4    /* Length of first three vars in hdr           */
+#define WIN_SIZE   512    /* Max sliding window size                     */
+
 /*----- Go-Back-n packet format -----*/
 typedef struct {
 	uint8_t  type;            /* packet type (e.g. SYN, DATA, ACK, FIN)     */
@@ -43,13 +48,15 @@ typedef struct {
     uint8_t data[DATALEN];    /* pointer to the payload                     */
 } __attribute__((packed)) gbnhdr;
 
-typedef struct state_t{
+typedef struct state_t {
+    int fd;
+    GBN_State state;
 
 	/* TODO: Your state information could be encoded here. */
 
 } state_t;
 
-enum {
+enum GBN_State {
 	CLOSED=0,
 	SYN_SENT,
 	SYN_RCVD,

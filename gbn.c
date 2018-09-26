@@ -1,4 +1,5 @@
 #include "gbn.h"
+#include "fd_queue.h"
 
 uint16_t checksum(uint16_t *buf, int nwords)
 {
@@ -48,15 +49,20 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen){
 int gbn_listen(int sockfd, int backlog){
 
 	/* TODO: Your code here. */
+	if(backlog < 0) {
+		errno = EINVAL;
+		return -1;
+	}
 
-	return(-1);
+	fd_q_init(backlog);
+	return 0;
 }
 
 int gbn_bind(int sockfd, const struct sockaddr *server, socklen_t socklen){
 
 	/* TODO: Your code here. */
-
-	return(-1);
+	int res = bind(sockfd, server, socklen);
+	return res;
 }	
 
 int gbn_socket(int domain, int type, int protocol){
@@ -65,13 +71,35 @@ int gbn_socket(int domain, int type, int protocol){
 	srand((unsigned)time(0));
 	
 	/* TODO: Your code here. */
-
-	return(-1);
+	int res = socket(domain, type, protocol);
+	return res;
 }
 
 int gbn_accept(int sockfd, struct sockaddr *client, socklen_t *socklen){
 
 	/* TODO: Your code here. */
+	int recv_size;
+	char buff[BUFFLEN];
+	sockaddr_in _client;
+	socklen_t _socklen;
+
+	while(1) {
+		recv_size = maybe_recvfrom(sockfd, buff, BUFFLEN, 0, &_client, &_socklen);
+		gbnhdr* pkt = (gbnhdr*)buf;
+		uint16_t old_sum = pkt->checksum;
+		pkt->checksum = 0;
+		uint16_t new_sum = checksum(buff, INFOLEN + DATALEN);
+		if(new_sum == old_sum && pkt->type == SYN)
+			break;
+	}
+	// receive SYN
+
+	// add it to queue...
+
+	// timer and keep sending SYNACK before receiving ACK
+	// max retrials...
+	
+
 
 	return(-1);
 }
