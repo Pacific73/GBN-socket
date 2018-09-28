@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <assert.h>
 #include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -38,7 +39,7 @@ extern int errno;
 /*----- Self defined parameters -----*/
 #define BUFFLEN   2048    /* Length of the buffer that prevents overflow */
 #define INFOLEN      4    /* Length of first three vars in hdr           */
-#define WIN_SIZE   512    /* Max sliding window size                     */
+#define SEQ_SIZE    10    /* Max sliding window size                     */
 
 /*----- Go-Back-n packet format -----*/
 typedef struct {
@@ -48,22 +49,28 @@ typedef struct {
     uint8_t data[DATALEN];    /* pointer to the payload                     */
 } __attribute__((packed)) gbnhdr;
 
+enum GBN_State {
+    CLOSED=0,
+    SYN_SENT,
+    SYN_RCVD,
+    ESTABLISHED,
+    FIN_SENT,
+    FIN_RCVD
+};
+
 typedef struct state_t {
     int fd;
-    GBN_State state;
+    enum GBN_State state;
+
+    int is_server;
+    struct sockaddr remote;
+
+    int syn_times;
+    int syn_start;
 
 	/* TODO: Your state information could be encoded here. */
 
 } state_t;
-
-enum GBN_State {
-	CLOSED=0,
-	SYN_SENT,
-	SYN_RCVD,
-	ESTABLISHED,
-	FIN_SENT,
-	FIN_RCVD
-};
 
 extern state_t s;
 
@@ -81,6 +88,10 @@ ssize_t  maybe_recvfrom(int  s, char *buf, size_t len, int flags, \
             struct sockaddr *from, socklen_t *fromlen);
 
 uint16_t checksum(uint16_t *buf, int nwords);
+int cmp_addr(struct sockaddr *s1, struct sockaddr *s2);
+
+void client_time_out();
+void server_time_out();
 
 
 #endif
