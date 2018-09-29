@@ -1,27 +1,26 @@
 #include "gbn.h"
 
 state_t s;
+gbnhdr data_array[SEQ_SIZE];
 
 void client_time_out() {
     if (s.state == SYN_SENT) {
-        char syn[4];
+        char syn[INFOLEN];
         gbnhdr *syn_hdr = (gbnhdr *)syn;
         syn_hdr->type = SYN;
-        syn_hdr->seqnum = s.syn_start;
+        syn_hdr->seqnum = s.cur_seq;
+        syn_hdr->length = INFOLEN;
         syn_hdr->checksum = 0;
-        syn_hdr->checksum = checksum((uint16_t *)syn_hdr, 4);
+        syn_hdr->checksum = checksum((uint16_t *)syn_hdr, INFOLEN);
 
-        while (1) {
-            int send_size =
-                sendto(s.fd, syn, 4, 0, &s.remote, sizeof(s.remote));
-            if (send_size != 4) {
-                perror("CONNECT RESEND FAIL");
-                continue;
-            }
-            s.state = SYN_SENT;
-            s.syn_times -= 1;
-            break;
+        int send_size =
+            sendto(s.fd, syn, INFOLEN, 0, &s.remote, sizeof(s.remote));
+        if (send_size != INFOLEN) {
+            perror("client_time_out() send failed");
+            return;
         }
+        s.state = SYN_SENT;
+        s.syn_times -= 1;
     } else if (s.state == ESTABLISHED) {
     }
 }
@@ -38,7 +37,11 @@ void gbn_init() {
     s.is_server = 0;
     memset(&s.remote, 0, sizeof(s.remote));
     s.syn_times = 5;
-    s.syn_start = -1;
+    s.cur_seq = 0;
+    s.tail_seq = 0;
+    s.win_size = SLOW;
+
+    memset(data_array, 0, sizeof(data_array));
 }
 
 int gbn_socket(int domain, int type, int protocol) {
@@ -98,28 +101,27 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen) {
     socklen_t _socklen = sizeof(_server);
     /* Init some variables, generate random start seqnum. */
 
-    char syn[4];
+    char syn[INFOLEN];
     gbnhdr *syn_hdr = (gbnhdr *)syn;
     syn_hdr->type = SYN;
     syn_hdr->seqnum = seq;
+    syn_hdr->length = INFOLEN;
     syn_hdr->checksum = 0;
-    syn_hdr->checksum = checksum((uint16_t *)syn_hdr, 4);
+    syn_hdr->checksum = checksum((uint16_t *)syn_hdr, INFOLEN);
     /* Make a SYN packet. */
 
-    while (1) {
-        send_size = sendto(sockfd, syn, 4, 0, server, socklen);
-        if (send_size != 4) {
-            perror("CONNECT SEND FAIL");
-            continue;
-        }
-        s.state = SYN_SENT;
-        s.syn_times -= 1;
-        break;
+    send_size = sendto(sockfd, syn, INFOLEN, 0, server, socklen);
+    if (send_size != INFOLEN) {
+        perror("gbn_connect() send syn failed");
+        return -1;
     }
+    s.state = SYN_SENT;
+    s.syn_times -= 1;
     /* Send this SYN packet. */
 
     s.remote = *server;
-    s.syn_start = seq;
+    s.cur_seq = seq_synack;
+    s.tail_seq = seq_synack;
     /* Update the state of socket. (for timeout func) */
 
     while (1) {
@@ -128,7 +130,7 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen) {
             maybe_recvfrom(sockfd, buf, BUFFLEN, 0, &_server, &_socklen);
         alarm(0);
 
-        if (recv_size != 4) {
+        if (recv_size != INFOLEN) {
             perror("CONNECT RECV FAIL");
             continue;
         }
@@ -136,23 +138,29 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen) {
             return -1;
         /* Set a timer.
          * If timeout, execute client_time_out() to resend a SYN.
-         * Back here to find recv_size != 4, continue.
+         * Back here to find recv_size != INFOLEN, continue.
          * After trying 5 times, return as failed.
          */
 
         gbnhdr *pkt = (gbnhdr *)buf;
         uint16_t old_sum = pkt->checksum;
         pkt->checksum = 0;
-        uint16_t new_sum = checksum((uint16_t *)pkt, 4);
-        if (pkt->type == SYNACK && pkt->seqnum == seq_synack &&
-            old_sum == new_sum) {
-            s.state = ESTABLISHED;
-            break;
-        }
+        uint16_t new_sum = checksum((uint16_t *)pkt, INFOLEN);
+        if (pkt->type != SYNACK)
+            continue;
+        if (pkt->seqnum != seq_synack)
+            continue;
+        if (old_sum != new_sum)
+            continue;
+        s.state = ESTABLISHED;
+        break;
         /* Validate the SYNACK packet we just received.
          * Treat error packets as lost.
          */
     }
+
+    s.cur_seq = (seq_synack + 1) % SEQ_SIZE;
+    s.tail_seq = s.cur_seq;
 
     return 0;
 }
@@ -166,7 +174,7 @@ int gbn_accept(int sockfd, struct sockaddr *client, socklen_t *socklen) {
 
     int recv_size, send_size;
     char buf[BUFFLEN];
-    uint8_t seq;
+    uint8_t seq, seq_synack;
     struct sockaddr _client;
     socklen_t _socklen = sizeof(_client);
     /* Init some variables. */
@@ -174,58 +182,58 @@ int gbn_accept(int sockfd, struct sockaddr *client, socklen_t *socklen) {
     while (1) {
         recv_size =
             maybe_recvfrom(sockfd, buf, BUFFLEN, 0, &_client, &_socklen);
-        if (recv_size != 4) {
+        if (recv_size != INFOLEN) {
             perror("ACCEPT RECV FAIL");
             continue;
         }
         gbnhdr *pkt = (gbnhdr *)buf;
         seq = pkt->seqnum;
+        seq_synack = (seq + 1) % SEQ_SIZE;
         uint16_t old_sum = pkt->checksum;
         pkt->checksum = 0;
         uint16_t new_sum = checksum((uint16_t *)buf, INFOLEN);
-        if (pkt->type == SYN && new_sum == old_sum)
-            break;
+        if (pkt->type != SYN)
+            continue;
+        if (new_sum != old_sum)
+            continue;
+        break;
     }
     /* Receive SYN and validate it. */
 
     if (s.state != CLOSED) {
-        char rst[4];
+        char rst[INFOLEN];
         gbnhdr *rst_hdr = (gbnhdr *)rst;
         rst_hdr->type = RST;
-        rst_hdr->seqnum = (seq + 1) % SEQ_SIZE;
+        rst_hdr->seqnum = seq_synack;
+        rst_hdr->length = INFOLEN;
         rst_hdr->checksum = 0;
-        rst_hdr->checksum = checksum((uint16_t *)rst_hdr, 4);
+        rst_hdr->checksum = checksum((uint16_t *)rst_hdr, INFOLEN);
 
-        while (1) {
-            send_size = sendto(sockfd, &rst, 4, 0, &_client, _socklen);
-            if (send_size != 4) {
-                perror("ACCEPT SEND RST FAIL");
-                continue;
-            }
-            return -1;
-        }
+        send_size = sendto(sockfd, &rst, INFOLEN, 0, &_client, _socklen);
+        if (send_size != INFOLEN)
+            perror("gbn_accept() send rst failed");
+        return -1;
     }
     /* We can only supports one sockfd. Reject this SYN and return rst. */
 
     s.state = SYN_RCVD;
     s.remote = _client;
+    s.cur_seq = seq_synack;
     /* Update the state of socket. (for timeout func) */
 
-    char synack[4];
+    char synack[INFOLEN];
     gbnhdr *sa_hdr = (gbnhdr *)synack;
     sa_hdr->type = SYNACK;
-    sa_hdr->seqnum = seq + 1;
+    sa_hdr->seqnum = seq_synack;
+    sa_hdr->length = INFOLEN;
     sa_hdr->checksum = 0;
-    sa_hdr->checksum = checksum((uint16_t *)synack, 4);
+    sa_hdr->checksum = checksum((uint16_t *)synack, INFOLEN);
     /* Make a SYNACK packet. */
 
-    while (1) {
-        send_size = sendto(sockfd, &synack, 4, 0, &_client, _socklen);
-        if (send_size != 4) {
-            perror("ACCEPT SEND SYNACK FAIL");
-            continue;
-        }
-        break;
+    send_size = sendto(sockfd, &synack, INFOLEN, 0, &_client, _socklen);
+    if (send_size != INFOLEN) {
+        perror("gbn_accept() send synack failed");
+        return -1;
     }
     /* Send a SYNACK. */
 
@@ -241,6 +249,51 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags) {
      *       up into multiple packets - you don't have to worry
      *       about getting more than N * DATALEN.
      */
+    if (sockfd != s.fd) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    assert(s.state == ESTABLISHED);
+
+    int has_frag = (int)len % DATALEN == 0 ? 0 : 1;
+    int n_pkts = (int)len / DATALEN + has_frag;
+    /* Calculate the number of packets to send. */
+
+    ssize_t sent_len = 0;
+
+    while(sent_len < (ssize_t)len) {
+
+    }
+
+    for (int i = 0; i < n_pkts; i++) {
+        uint16_t pl_len = DATALEN;
+        if (has_frag && i == n_pkts - 1)
+            pl_len = (uint16_t)len % DATALEN;
+        /* Determine length of payload. */
+
+        while(1) {
+        	// 
+        }
+
+        gbnhdr *pkt = &data_array[s.cur_seq];
+        pkt->type = DATA;
+        pkt->seqnum = s.cur_seq;
+        pkt->length = pl_len + INFOLEN;
+        pkt->checksum = 0;
+        memcpy(pkt->data, buf + DATALEN * i, (size_t)pl_len);
+        pkt->checksum = checksum((uint16_t *)&pkt, (int)pkt->length);
+        /* Copy data to packet window. */
+
+        int send_size = sendto(sockfd, pkt, (int)pkt->length, flags, &s.remote,
+                               sizeof(s.remote));
+        if (send_size != (int)pkt->length) {
+            perror("gbn_send() send data failed");
+            if(sent_len > 0) return sent_len;
+            return -1;
+        }
+        sent_len += (ssize_t)pl_len;
+    }
 
     return (-1);
 }
@@ -248,6 +301,61 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags) {
 ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags) {
 
     /* TODO: Your code here. */
+    if (sockfd != s.fd) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    int recv_size;
+    char _buf[BUFFLEN];
+    struct sockaddr client;
+    socklen_t socklen = sizeof(client);
+
+    while (1) {
+        recv_size =
+            maybe_recvfrom(sockfd, _buf, BUFFLEN, flags, &client, &socklen);
+        if (recv_size < 0)
+            continue;
+        gbnhdr *header = (gbnhdr *)_buf;
+        uint8_t old_sum = header->checksum;
+        header->checksum = 0;
+        uint8_t new_sum = checksum((uint16_t *)header, (int)header->length);
+        if (new_sum != old_sum)
+            continue;
+        if (s.state == ESTABLISHED)
+            break;
+        if (s.state == SYN_RCVD) {
+            if (header->type == SYN) {
+                char synack[INFOLEN];
+                gbnhdr *sa_hdr = (gbnhdr *)synack;
+                sa_hdr->type = SYN;
+                sa_hdr->seqnum = (header->seqnum + 1) % SEQ_SIZE;
+                sa_hdr->length = INFOLEN;
+                sa_hdr->checksum = 0;
+                sa_hdr->checksum = checksum((uint16_t *)sa_hdr, INFOLEN);
+
+                while (1) {
+                    int send_size = sendto(s.fd, synack, INFOLEN, 0, &s.remote,
+                                           sizeof(s.remote));
+                    if (send_size != INFOLEN) {
+                        perror("CONNECT RESEND FAIL");
+                        continue;
+                    }
+                    break;
+                }
+            } else if (header->type == DATA) {
+                s.state = ESTABLISHED;
+                break;
+            } else {
+                perror("error in recv syn_rcvd");
+            }
+        } else
+            perror("error in recv s.state other than synrcvd and established");
+    }
+
+    gbnhdr *header = (gbnhdr *)_buf;
+
+    /* Deal with window...*/
 
     return (-1);
 }

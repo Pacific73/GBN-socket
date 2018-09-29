@@ -38,13 +38,14 @@ extern int errno;
 
 /*----- Self defined parameters -----*/
 #define BUFFLEN   2048    /* Length of the buffer that prevents overflow */
-#define INFOLEN      4    /* Length of first three vars in hdr           */
+#define INFOLEN      6    /* Length of first three vars in hdr           */
 #define SEQ_SIZE    10    /* Max sliding window size                     */
 
 /*----- Go-Back-n packet format -----*/
 typedef struct {
 	uint8_t  type;            /* packet type (e.g. SYN, DATA, ACK, FIN)     */
 	uint8_t  seqnum;          /* sequence number of the packet              */
+    uint16_t length;          /* length of header and payload               */
     uint16_t checksum;        /* header and payload checksum                */
     uint8_t data[DATALEN];    /* pointer to the payload                     */
 } __attribute__((packed)) gbnhdr;
@@ -58,6 +59,12 @@ enum GBN_State {
     FIN_RCVD
 };
 
+enum WIN_Size {
+    SLOW=1,
+    MODERATE=2,
+    FAST=4
+};
+
 typedef struct state_t {
     int fd;
     enum GBN_State state;
@@ -66,13 +73,15 @@ typedef struct state_t {
     struct sockaddr remote;
 
     int syn_times;
-    int syn_start;
+    uint8_t cur_seq;
+    uint8_t tail_seq;
+
+    enum WIN_Size win_size;
 
 	/* TODO: Your state information could be encoded here. */
 
 } state_t;
 
-extern state_t s;
 
 void gbn_init();
 int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen);
