@@ -28,6 +28,8 @@ int main(int argc, char *argv[])
 		perror("gbn_socket");
 		exit(-1);
 	}
+
+	printf("receiver socket(): %d\n", sockfd);
 	
 	/*--- Setting the server's parameters -----*/
 	memset(&server, 0, sizeof(struct sockaddr_in));
@@ -40,12 +42,15 @@ int main(int argc, char *argv[])
 		perror("gbn_bind");
 		exit(-1);
 	}
+
+	printf("receiver bind()\n");
 	
 	/*----- Listening to new connections -----*/
 	if (gbn_listen(sockfd, 1) == -1){
 		perror("gbn_listen");
 		exit(-1);
 	}
+	printf("receiver listen()\n");
 
 	/*----- Waiting for the client to connect -----*/
 	socklen = sizeof(struct sockaddr_in);
@@ -55,6 +60,7 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 	
+	printf("receiver accept!\n");
 	/*----- Reading from the socket and dumping it to the file -----*/
 	while(1){
 		if ((numRead = gbn_recv(newSockfd, buf, DATALEN, 0)) == -1){

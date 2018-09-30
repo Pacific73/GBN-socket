@@ -36,6 +36,8 @@ int main(int argc, char *argv[]){
 		exit(-1);
 	}
 
+	printf("sender socket(): %d\n", sockfd);
+
 	/*--- Setting the server's parameters -----*/
 	memset(&server, 0, sizeof(struct sockaddr_in));
 	server.sin_family = AF_INET;
@@ -47,6 +49,8 @@ int main(int argc, char *argv[]){
 		perror("gbn_connect");
 		exit(-1);
 	}
+
+	printf("sender connected!\n");
 
 	/*----- Reading from the file and sending it through the socket -----*/
 	while ((numRead = fread(buf, 1, DATALEN * N, inputFile)) > 0){

@@ -1,6 +1,8 @@
-.o
+*.o
 .DS_Store
 .tags
 .tags_sorted_by_file
 sender
 receiver
+target
+text

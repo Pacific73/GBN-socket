@@ -70,6 +70,7 @@ typedef struct state_t {
     enum GBN_State state;
 
     int is_server;
+    int flags;
     struct sockaddr remote;
 
     int syn_times;
@@ -78,11 +79,17 @@ typedef struct state_t {
 
     enum WIN_Size win_size;
 
+    gbnhdr data_array[SEQ_SIZE];
+    int acked[SEQ_SIZE];
+
+    char last_buf[BUFFLEN * SEQ_SIZE];
+    int last_len;
+
 	/* TODO: Your state information could be encoded here. */
 
 } state_t;
 
-
+/* Socket related functions. */
 void gbn_init();
 int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen);
 int gbn_listen(int sockfd, int backlog);
@@ -96,9 +103,12 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags);
 ssize_t  maybe_recvfrom(int  s, char *buf, size_t len, int flags, \
             struct sockaddr *from, socklen_t *fromlen);
 
+/* Some helper functions. */
 uint16_t checksum(uint16_t *buf, int nwords);
 int cmp_addr(struct sockaddr *s1, struct sockaddr *s2);
+int window_cnt(uint8_t cur_seq, uint8_t tail_seq);
 
+/* Time out handlers. */
 void client_time_out();
 void server_time_out();
 
