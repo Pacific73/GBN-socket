@@ -29,7 +29,7 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 
-	printf("receiver socket(): %d\n", sockfd);
+	printf("[receiver] socket(): %d finished.\n", sockfd);
 	
 	/*--- Setting the server's parameters -----*/
 	memset(&server, 0, sizeof(struct sockaddr_in));
@@ -43,14 +43,14 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 
-	printf("receiver bind()\n");
+	printf("[receiver] bind() finished.\n");
 	
 	/*----- Listening to new connections -----*/
 	if (gbn_listen(sockfd, 1) == -1){
 		perror("gbn_listen");
 		exit(-1);
 	}
-	printf("receiver listen()\n");
+	printf("[receiver] listen() finished.\n");
 
 	/*----- Waiting for the client to connect -----*/
 	socklen = sizeof(struct sockaddr_in);
@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 	
-	printf("receiver accept!\n");
+	printf("[receiver] accept() finished.\n");
 	/*----- Reading from the socket and dumping it to the file -----*/
 	while(1){
 		if ((numRead = gbn_recv(newSockfd, buf, DATALEN, 0)) == -1){
@@ -69,14 +69,16 @@ int main(int argc, char *argv[])
 		}
 		else if (numRead == 0)
 			break;
+		printf("[receiver] recv() this round finished.\n");
 		fwrite(buf, 1, numRead, outputFile);
 	}
-
+	printf("[receiver] recv() finished.\n");
 	/*----- Closing the socket -----*/
 	if (gbn_close(sockfd) == -1){
 		perror("gbn_close");
 		exit(-1);
 	}
+	printf("[receiver] close() finished.\n");
 
 	/*----- Closing the file -----*/
 	if (fclose(outputFile) == EOF){

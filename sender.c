@@ -36,7 +36,7 @@ int main(int argc, char *argv[]){
 		exit(-1);
 	}
 
-	printf("sender socket(): %d\n", sockfd);
+	printf("[sender] socket(): %d finished.\n", sockfd);
 
 	/*--- Setting the server's parameters -----*/
 	memset(&server, 0, sizeof(struct sockaddr_in));
@@ -50,7 +50,7 @@ int main(int argc, char *argv[]){
 		exit(-1);
 	}
 
-	printf("sender connected!\n");
+	printf("[sender] connect() finished.\n");
 
 	/*----- Reading from the file and sending it through the socket -----*/
 	while ((numRead = fread(buf, 1, DATALEN * N, inputFile)) > 0){
@@ -58,7 +58,9 @@ int main(int argc, char *argv[]){
 			perror("gbn_send");
 			exit(-1);
 		}
+		printf("[sender] send() this round finished.\n");
 	}
+	printf("[sender] send() finished.\n");
 
 	/*----- Closing the socket -----*/
 	if (gbn_close(sockfd) == -1){
