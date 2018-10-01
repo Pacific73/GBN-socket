@@ -69,7 +69,7 @@ int main(int argc, char *argv[])
 		}
 		else if (numRead == 0)
 			break;
-		printf("[receiver] recv() this round finished.\n");
+		printf("[receiver] ------------------------\n");
 		fwrite(buf, 1, numRead, outputFile);
 	}
 	printf("[receiver] recv() finished.\n");

@@ -74,6 +74,9 @@ typedef struct state_t {
     struct sockaddr remote;
 
     int syn_times;
+    int data_times;
+    int fin_times;
+
     uint8_t cur_seq;
     uint8_t tail_seq;
 

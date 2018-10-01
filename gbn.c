@@ -1,6 +1,7 @@
 #include "gbn.h"
 
 state_t s;
+gbnhdr empty;
 
 void client_time_out() {
     printf("timeout: s.state = %d\n", s.state);
@@ -24,11 +25,11 @@ void client_time_out() {
             perror("client_time_out() send failed");
             return;
         }
-        s.state = SYN_SENT;
+        
         if (s.syn_times > 0) {
             s.syn_times -= 1;
             alarm(TIMEOUT);
-        }
+        } else s.state = CLOSED;
 
     } else if (s.state == ESTABLISHED) {
         /* Timeout after the client sends a DATA pkt.
@@ -38,15 +39,23 @@ void client_time_out() {
 
         s.win_size = SLOW;
         for (int i = 0; i < s.win_size; i++) {
-            gbnhdr *header = &s.data_array[(s.cur_seq + i) % SEQ_SIZE];
-            int send_size = sendto(s.fd, header, (int)header->length, s.flags,
+            gbnhdr *header = &s.data_array[((int)s.cur_seq + i) % SEQ_SIZE];
+            if (header->length == 0)
+                continue;
+            int send_size = sendto(s.fd, header, DATALEN + INFOLEN, s.flags,
                                    &s.remote, sizeof(s.remote));
-            if (send_size <= 0) {
+            if (send_size != DATALEN + INFOLEN) {
                 i -= 1;
                 continue;
             }
-            if (i == 0)
-                alarm(TIMEOUT);
+            if (i == 0) {
+                if (s.data_times > 0) {
+                    s.data_times -= 1;
+                    alarm(TIMEOUT);
+                    return;
+                }
+                s.state = CLOSED;
+            }
         }
     } else if (s.state == FIN_SENT) {
         char fin[INFOLEN];
@@ -65,14 +74,41 @@ void client_time_out() {
             return;
         }
 
+        if (s.fin_times > 0) {
+            s.fin_times -= 1;
+            alarm(TIMEOUT);
+        } else s.state = CLOSED;
+
     } else {
         perror("client_time_out() error");
     }
 }
 
 void server_time_out() {
-    if (s.state == ESTABLISHED) {
-        /*repeat synack*/
+    if (s.state == FIN_SENT) {
+        char fin[INFOLEN];
+        gbnhdr *fin_hdr = (gbnhdr *)fin;
+        fin_hdr->type = FIN;
+        fin_hdr->seqnum = s.cur_seq;
+        fin_hdr->length = INFOLEN;
+        fin_hdr->checksum = 0;
+        fin_hdr->checksum = checksum((uint16_t *)fin_hdr, INFOLEN / 2);
+        /* Make a FIN pkt. */
+
+        int send_size =
+            sendto(s.fd, fin, INFOLEN, 0, &s.remote, sizeof(s.remote));
+        if (send_size != INFOLEN) {
+            perror("client_time_out() send FIN failed");
+            return;
+        }
+
+        if (s.fin_times > 0) {
+            s.fin_times -= 1;
+            alarm(TIMEOUT);
+        } else s.state = CLOSED;
+
+    } else {
+        perror("server_time_out() error");
     }
 }
 
@@ -82,14 +118,18 @@ void gbn_init() {
     s.is_server = 0;
     memset(&s.remote, 0, sizeof(s.remote));
     s.syn_times = 5;
+    s.data_times = 5;
+    s.fin_times = 5;
     s.cur_seq = 0;
     s.tail_seq = 0;
     s.win_size = SLOW;
 
-    memset(s.data_array, 0, sizeof(s.data_array));
-    memset(s.acked, 0, sizeof(s.acked));
+    memset(s.data_array, 0, sizeof(gbnhdr) * SEQ_SIZE);
+    memset(s.acked, 0, sizeof(int) * SEQ_SIZE);
     memset(s.last_buf, 0, sizeof(s.last_buf));
     s.last_len = 0;
+
+    memset(&empty, 0, sizeof(empty));
 }
 
 int gbn_socket(int domain, int type, int protocol) {
@@ -188,7 +228,8 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen) {
         alarm(TIMEOUT);
         recv_size =
             maybe_recvfrom(sockfd, buf, BUFFLEN, 0, &_server, &_socklen);
-        alarm(0);
+        if(s.state == CLOSED)
+        	return -1;
 
         if (recv_size != INFOLEN) {
             perror("gbn_connect() recvfrom failed");
@@ -213,6 +254,8 @@ int gbn_connect(int sockfd, const struct sockaddr *server, socklen_t socklen) {
             continue;
         if (old_sum != new_sum)
             continue;
+
+        alarm(0);
         s.state = ESTABLISHED;
 
         printf("gbn_connect() recv SYNACK\n");
@@ -334,6 +377,7 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags) {
         /* First, send as many pkts as we can.
          * Second, recv ack to push sliding window.
          */
+        printf("gbn_send() ---------------------------\n");
 
         int cnt = 0;
         if (sent_len < (ssize_t)len &&
@@ -341,7 +385,8 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags) {
             /* If we haven't done sending,
              * and available slots in sending window...
              */
-            printf("gbn_send() can send\n");
+            printf("gbn_send() can send: %d - %d = %d pkts\n", s.win_size, cnt,
+                   s.win_size - cnt);
 
             alarm(TIMEOUT);
 
@@ -351,9 +396,9 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags) {
                     payload_len = (int)len % DATALEN;
                 /* Determine the length of payload. */
 
-                gbnhdr *pkt = &s.data_array[(int)s.cur_seq + i];
+                gbnhdr *pkt = &s.data_array[((int)s.cur_seq + i) % SEQ_SIZE];
                 pkt->type = DATA;
-                pkt->seqnum = s.cur_seq + (uint8_t)i;
+                pkt->seqnum = (s.cur_seq + (uint8_t)i) % SEQ_SIZE;
                 pkt->length = (uint16_t)payload_len + INFOLEN;
                 pkt->checksum = 0;
                 memcpy(pkt->data, buf + sent_len, (size_t)payload_len);
@@ -377,13 +422,7 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags) {
                 sent_n += 1;
                 s.tail_seq = (s.tail_seq + 1) % SEQ_SIZE;
             }
-            printf("gbn_send() sending for this round finished\n");
         }
-
-        if (sent_len == (ssize_t)len && sent_n == n_pkts)
-            break;
-
-        printf("gbn_send() unfinished...\n");
 
         char buf[BUFFLEN];
         struct sockaddr client;
@@ -391,7 +430,7 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags) {
 
         int recv_size =
             maybe_recvfrom(sockfd, buf, BUFFLEN, 0, &client, &socklen);
-        if (recv_size <= 0)
+        if (recv_size != INFOLEN)
             continue;
         // check source!
 
@@ -412,7 +451,13 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags) {
         if (ackseq < q_front)
             ackseq += SEQ_SIZE;
 
-        if (s.data_array[ackseq].length == 0)
+        printf("gbn_send() [%hhu, %hhu](%hhu) recv ACK: %hhu\n", s.cur_seq,
+               (s.cur_seq + (uint8_t)s.win_size - 1) % SEQ_SIZE, s.tail_seq,
+               header->seqnum);
+        printf("gbn_send() q [%hhu, %hhu] ackseq:%hhu\n", q_front, q_tail,
+               ackseq);
+
+        if (s.data_array[ackseq % SEQ_SIZE].length == 0)
             continue;
         /* If no content in the cell,
          * ignore it.
@@ -420,6 +465,7 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags) {
 
         assert(ackseq >= q_front);
         alarm(0);
+        s.data_times = 5;
         /* Received ack after q_front, cancel the alarm. */
 
         for (uint8_t i = q_front; i <= ackseq; i++)
@@ -432,8 +478,9 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags) {
             if (s.acked[index] == 0)
                 break;
             s.acked[index] = 0;
-            memset(s.data_array + index, 0, sizeof(gbnhdr));
+            s.data_array[index] = empty;
         }
+
         /* Find next cell waiting for ACK.
          * Clean old cells.
          */
@@ -443,6 +490,18 @@ ssize_t gbn_send(int sockfd, const void *buf, size_t len, int flags) {
         s.cur_seq = push_pos % SEQ_SIZE;
         s.tail_seq = q_tail % SEQ_SIZE;
         /* Update s.tail_seq, push s.cur_seq forward. */
+
+        if (s.win_size == SLOW) {
+            s.win_size = MODERATE;
+        } else if (s.win_size == MODERATE) {
+            s.win_size = FAST;
+        }
+        printf("gbn_send() --> [%hhu, %hhu](%hhu)\n", s.cur_seq,
+               (s.cur_seq + (uint8_t)s.win_size - 1) % SEQ_SIZE, s.tail_seq);
+
+        if (sent_len == (ssize_t)len && sent_n == n_pkts
+        	&& s.cur_seq == s.tail_seq)
+            break;
     }
 
     return sent_len;
@@ -479,7 +538,6 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags) {
         while (1) {
             recv_size =
                 maybe_recvfrom(sockfd, _buf, BUFFLEN, flags, &client, &socklen);
-            printf("gbn_recv() recv size: %d\n", recv_size);
             if (recv_size != INFOLEN && recv_size != INFOLEN + DATALEN)
                 continue;
 
@@ -489,12 +547,11 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags) {
             int check_len = INFOLEN;
             if (header->type == DATA)
                 check_len += DATALEN;
-            printf("gbn_recv() recv pkt_len: %hu | check_len:%d\n",
-                   header->length, check_len);
             uint16_t new_sum = checksum((uint16_t *)header, check_len / 2);
 
-            printf("gbn_recv() recv type:%hhu | os:%hu | ns:%hu\n",
-                   header->type, old_sum, new_sum);
+            printf(
+                "gbn_recv() recv type: %hhu | pkt_len: %hu | os:%hu | ns:%hu\n",
+                header->type, header->length, old_sum, new_sum);
 
             if (header->type == DATA && s.state == SYN_RCVD)
                 s.state = ESTABLISHED;
@@ -505,7 +562,7 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags) {
                 s.state = FIN_RCVD;
                 return 0;
             }
-            if (s.state == ESTABLISHED)
+            if (s.state == ESTABLISHED && header->type == DATA)
                 break;
 
             if (s.state == SYN_RCVD) {
@@ -533,8 +590,6 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags) {
                 perror("gbn_recv() s.state is not SYN_RCVD or ESTABLISHED");
         }
 
-        printf("gbn_recv() recv DATA\n");
-
         /* Received DATA */
 
         gbnhdr *header = (gbnhdr *)_buf;
@@ -544,7 +599,8 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags) {
         if (seq < q_front)
             seq += SEQ_SIZE;
 
-        printf("gbn_recv() [%hhu, %hhu] recv->%hhu\n", q_front, q_tail, seq);
+        printf("gbn_recv() DATA [%hhu, %hhu] recv->%hhu\n", q_front, q_tail,
+               seq);
 
         if (!(q_front <= seq && seq <= q_tail))
             continue;
@@ -554,7 +610,6 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags) {
         s.data_array[header->seqnum] = *header;
         /* Record it. */
 
-        printf("gbn_recv() record finished\n");
 
         uint8_t push_pos;
         for (push_pos = s.cur_seq;; push_pos++) {
@@ -568,14 +623,13 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags) {
             /* Copy payload to last_buf. */
 
             s.acked[index] = 0;
-            memset(&s.data_array[index], 0, sizeof(gbnhdr));
+            s.data_array[index] = empty;
         }
         /* Find next empty cell and clean old cells. */
-        printf("gbn_recv() clean finished\n");
 
         char ack[INFOLEN];
         gbnhdr *ack_hdr = (gbnhdr *)ack;
-        ack_hdr->type = SYN;
+        ack_hdr->type = DATAACK;
         ack_hdr->seqnum = (push_pos + SEQ_SIZE - 1) % SEQ_SIZE;
         ack_hdr->length = INFOLEN;
         ack_hdr->checksum = 0;
@@ -588,10 +642,13 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags) {
             continue;
         }
         /* Send ack. */
-        printf("gbn_recv() send ACK\n");
+        printf("gbn_recv() send ACK:%hhu\n", ack_hdr->seqnum);
 
         s.cur_seq = push_pos % SEQ_SIZE;
         /* Push the window */
+
+        if(s.last_len == 0)
+        	continue;
 
         if (s.last_len <= (int)len) {
             memcpy(buf, s.last_buf, s.last_len);
@@ -608,6 +665,8 @@ ssize_t gbn_recv(int sockfd, void *buf, size_t len, int flags) {
 }
 
 int gbn_close(int sockfd) {
+	if(s.state == CLOSED)
+		return 0;
 
     /* TODO: Your code here. */
     if (s.is_server == 0 || (s.is_server == 1 && s.state == SYN_RCVD)) {
@@ -628,6 +687,7 @@ int gbn_close(int sockfd) {
             return -1;
         }
         s.state = FIN_SENT;
+        alarm(TIMEOUT);
         /* Send FIN. */
 
         printf("gbn_close() send FIN\n");
@@ -644,6 +704,9 @@ int gbn_close(int sockfd) {
         while (1) {
             recv_size =
                 maybe_recvfrom(s.fd, buf, BUFFLEN, 0, &client, &socklen);
+            if(s.state == CLOSED)
+            	return 0;
+
             if (recv_size != INFOLEN) {
                 perror("gbn_close() recv FINACK error");
                 continue;

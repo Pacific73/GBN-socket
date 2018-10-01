@@ -58,7 +58,7 @@ int main(int argc, char *argv[]){
 			perror("gbn_send");
 			exit(-1);
 		}
-		printf("[sender] send() this round finished.\n");
+		printf("[sender] -----------------------------\n");
 	}
 	printf("[sender] send() finished.\n");
 
