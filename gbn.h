@@ -43,11 +43,11 @@ extern int errno;
 
 /*----- Go-Back-n packet format -----*/
 typedef struct {
-	uint8_t  type;            /* packet type (e.g. SYN, DATA, ACK, FIN)     */
-	uint8_t  seqnum;          /* sequence number of the packet              */
-    uint16_t length;          /* length of header and payload               */
-    uint16_t checksum;        /* header and payload checksum                */
-    uint8_t data[DATALEN];    /* pointer to the payload                     */
+	uint8_t     type;            /* packet type (e.g. SYN, DATA, ACK, FIN)     */
+	uint8_t     seqnum;          /* sequence number of the packet              */
+    uint16_t    length;          /* length of header and payload               */
+    uint16_t    checksum;        /* header and payload checksum                */
+    uint8_t     data[DATALEN];   /* pointer to the payload                     */
 } __attribute__((packed)) gbnhdr;
 
 enum GBN_State {
@@ -66,27 +66,27 @@ enum WIN_Size {
 };
 
 typedef struct state_t {
-    int fd;
-    enum GBN_State state;
+    int                 fd;                       
+    enum GBN_State      state;
 
-    int is_server;
-    int flags;
-    struct sockaddr remote;
+    int                 is_server;
+    int                 flags;
+    struct sockaddr     remote;
 
-    int syn_times;
-    int data_times;
-    int fin_times;
+    int                 syn_times;
+    int                 data_times;
+    int                 fin_times;
 
-    uint8_t cur_seq;
-    uint8_t tail_seq;
+    uint8_t             cur_seq;
+    uint8_t             tail_seq;
 
-    enum WIN_Size win_size;
+    enum WIN_Size       win_size;
 
-    gbnhdr data_array[SEQ_SIZE];
-    int acked[SEQ_SIZE];
+    gbnhdr              data_array[SEQ_SIZE];
+    int                 acked[SEQ_SIZE];
 
-    char last_buf[BUFFLEN * SEQ_SIZE];
-    int last_len;
+    char                last_buf[BUFFLEN * SEQ_SIZE];
+    int                 last_len;
 
 	/* TODO: Your state information could be encoded here. */
 
