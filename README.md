@@ -1,9 +1,7 @@
 # GBN-socket
 > Homework 1 - CS5450 Networked and Distributed Systems
 >
-> Chenyu Zhang - Cornell ID 4982538 - cz442@cornell.edu
->
-> Shanwen Wang - Cornell ID xxxxxxx - swxxx@cornell.edu
+> Chenyu Zhang - cz442@cornell.edu
 
 ## Intro
 
@@ -50,21 +48,21 @@ We can only implement this protocol based on UDP socket in C. In other words, we
 ### A Typical Workflow
 
 ```
-Sender(Client)						Receiver(Server)
-     ↓										↓
-  socket()								 socket()
-  	 ↓										↓
-  connect()	------------+				  bind()
-  	 					|					↓
-  	 					|   SYN			 listen()
-  	 		ACK 		+-------------->    ↓
-     +---------------------------------- accept()
-     ↓       		DATA/DATAACK			↓
-  sendto() <===========================> recvfrom()
-     ↓				FIN/FINACK   			↓
-   close() ------------------------------>  ↓
-   	 ↓    <----------------------------- close()
-   	done
+Sender(Client)                          Receiver(Server)
+    ↓                                   ↓
+    socket()                            socket()
+    ↓                                   ↓
+    connect()   --------+               bind()
+                        |               ↓
+                        |   SYN         listen()
+            ACK         +-------------> ↓
+    +---------------------------------- accept()
+    ↓           DATA/DATAACK            ↓
+    sendto()<=========================> recvfrom()
+    ↓           FIN/FINACK              ↓
+    close() ------------------------->  ↓
+    ↓   <-----------------------------  close()
+    done
 ```
 
 ### General
